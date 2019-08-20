@@ -1,0 +1,68 @@
+# With square kernels and equal stride
+import torch.nn as nn
+import torch
+from caffe import layers as L
+import caffe
+import numpy as np
+
+def torch_test():
+    checkpoint_path = '/data1/exp/ctdet/default/model_best.pth'
+    data_dict = torch.load(checkpoint_path)['state_dict']
+    m = nn.ConvTranspose2d(160, 160, kernel_size=4, stride=2,padding=1)
+    # non-square kernels and unequal stride and with padding
+    # m = nn.ConvTranspose2d(1, 1, (3, 5), stride=(2, 1), padding=(4, 2))
+    m.train(False)
+    weight =torch.tensor([[[[1.,2.,2.,1.],[2,3,3,2],[2,3,3,2],[1,2,2,1]]]])
+    bias = torch.tensor([5.,])
+    weight = data_dict['deconv2.weight']
+    bias = data_dict['deconv2.bias']
+    m.load_state_dict({'weight':weight,'bias':bias})
+    # input = torch.tensor([[[[1.,2,3],[4,5,6],[7,8,9]]]])
+    input = torch.tensor(np.load('out.npy'))
+    output = m(input)
+    print('==')
+    # exact output size can be also specified as an argument
+    # print(output.cpu().detach().numpy()[0,0,:,:])
+    # input = torch.randn(1, 16, 12, 12)
+
+
+def caffe_test():
+    net = create_model()
+    with open('caffe_test.prototxt', 'w') as f:
+        f.write(str(net.to_proto()))
+    net = caffe.Net('caffe_test.prototxt', caffe.TEST)
+    print('---')
+    # input_ = np.array([[[1,2,3],[4,5,6],[7,8,9]]])
+    input_ = np.load('out.npy')
+    net.blobs['data'].data[...] = input_
+    weight = np.array([[[[1,2,2,1],[2,3,3,2],[2,3,3,2],[1,2,2,1]]]])
+    bias = np.array(5)
+    checkpoint_path = '/data1/exp/ctdet/default/model_best.pth'
+    data_dict = torch.load(checkpoint_path)['state_dict']
+    weight = data_dict['deconv2.weight']
+    bias = data_dict['deconv2.bias']
+    net.params['deconv'][0].data[...]=weight
+    net.params['deconv'][1].data[...]=bias
+    out = net.forward()
+    val = out['conv'][0,0,:,:]
+    # print(val)
+    print('==')
+    
+    
+def create_model(depth_coe=1.):
+    n = caffe.NetSpec()
+
+    n.data = L.Input(shape=[dict(dim=[1, 160, 32, 32])], ntop=1)
+    n.conv = L.Deconvolution(n.data,convolution_param=dict(num_output=160,
+                                    kernel_size=4,
+                                    stride=2,
+                                    pad=1,
+                                    weight_filler=dict(type='xavier'),
+                                    bias_filler=dict(type='constant', value=0)),
+                                    param=[dict(lr_mult=0)],
+                                    name='deconv')
+    return n
+
+if __name__ == '__main__':
+    torch_test()
+    caffe_test()
